@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from telegram import Update  # noqa: E402
+from telegram import BotCommand, Update  # noqa: E402
 from telegram.constants import ChatAction, ParseMode  # noqa: E402
 from telegram.error import BadRequest, NetworkError  # noqa: E402
 from telegram.ext import Application, CommandHandler, ContextTypes, filters  # noqa: E402
@@ -132,6 +132,22 @@ async def daily_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🛑 Daily briefing stopped." if jobs else "No daily briefing was set.")
 
 
+COMMANDS = [
+    BotCommand("trends", "Hottest topics in the Western Muslim world"),
+    BotCommand("ideas", "Podcast episode ideas (add a topic: /ideas marriage)"),
+    BotCommand("brief", "Full briefing: trends, pitches, upcoming dates"),
+    BotCommand("daily_on", "Get the briefing every morning"),
+    BotCommand("daily_off", "Stop the morning briefing"),
+    BotCommand("help", "Show all commands"),
+    BotCommand("myid", "Show your Telegram user ID"),
+]
+
+
+async def setup(app: Application) -> None:
+    await app.bot.set_my_commands(COMMANDS)  # fills the "/" menu in Telegram
+    await restore_daily_jobs(app)
+
+
 async def restore_daily_jobs(app: Application) -> None:
     """Re-schedule daily briefings for chats listed in DAILY_CHAT_IDS after a restart."""
     for chat_id in os.getenv("DAILY_CHAT_IDS", "").replace(" ", "").split(","):
@@ -159,7 +175,7 @@ def main() -> None:
         Application.builder()
         .token(TOKEN)
         .concurrent_updates(True)
-        .post_init(restore_daily_jobs)
+        .post_init(setup)
         .connect_timeout(20)
         .get_updates_connect_timeout(20)
     )
