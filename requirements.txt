@@ -1,0 +1,5 @@
+google-genai>=2.29
+python-telegram-bot[job-queue,socks]>=22.8
+python-dotenv>=1.0
+feedparser>=6.0
+tzdata
