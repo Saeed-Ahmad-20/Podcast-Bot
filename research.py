@@ -97,7 +97,9 @@ async def _generate(prompt: str) -> str:
     raise ResearchError("⚠️ Gemini didn't return an answer. Please try again in a few minutes.")
 
 
-async def _run(task: str) -> str:
+async def _run(task: str, progress=None) -> str:
+    if progress:
+        await progress("📰 Reading the latest news and community discussions")
     items = await sources.gather()
     if not items:
         raise ResearchError("⚠️ Couldn't load any news or Reddit feeds. Check the internet connection.")
@@ -106,6 +108,8 @@ async def _run(task: str) -> str:
         f"Today is {today}.\n\n{task}{_history_note()}\n\n"
         f"Material gathered in the last few days ({len(items)} items):\n\n{sources.format_items(items)}"
     )
+    if progress:
+        await progress(f"🧠 Analysing {len(items)} stories and writing your ideas")
     text = await _generate(prompt)
 
     match = re.search(r"^\s*TITLES:(.*)$", text, flags=re.MULTILINE)
@@ -115,7 +119,7 @@ async def _run(task: str) -> str:
     return text.strip()
 
 
-async def hot_topics() -> str:
+async def hot_topics(progress=None) -> str:
     return await _run(
         "Find the 6-8 hottest topics in the Western Muslim world right now.\n\n"
         "For each topic give:\n"
@@ -123,11 +127,12 @@ async def hot_topics() -> str:
         "Why it's trending (2-3 sentences, mentioning which regions and communities are discussing it)\n"
         "Heat: 🔥 to 🔥🔥🔥\n"
         "Sources: 1-3 links from the material\n\n"
-        "Finish with one line naming the single topic you would record an episode on this week."
+        "Finish with one line naming the single topic you would record an episode on this week.",
+        progress,
     )
 
 
-async def podcast_ideas(focus: str | None = None) -> str:
+async def podcast_ideas(focus: str | None = None, progress=None) -> str:
     scope = (
         f"The producer wants episodes about: {focus}. Use any related material below, and "
         "if little is directly related, build ideas on the closest current hooks you can find."
@@ -143,11 +148,12 @@ async def podcast_ideas(focus: str | None = None) -> str:
         "<i>Talking points:</i> 3-4 short bullets\n"
         "<i>Guest ideas:</i> types of guests or named public figures who speak on this\n"
         "<i>Clip idea:</i> one short-form social clip to promote it\n"
-        "Sources: 1-2 links from the material"
+        "Sources: 1-2 links from the material",
+        progress,
     )
 
 
-async def weekly_brief() -> str:
+async def weekly_brief(progress=None) -> str:
     return await _run(
         "Write the producer's briefing.\n\n"
         "Part 1 - <b>What's hot</b>: the top 5 topics in the Western Muslim world, each with "
@@ -155,5 +161,6 @@ async def weekly_brief() -> str:
         "Part 2 - <b>Episode ideas</b>: 3 episode pitches built on those topics, each with "
         "title, hook, angle, 3 talking points and guest ideas.\n"
         "Part 3 - <b>Coming up</b>: dates in the next 2-4 weeks worth planning for (Islamic "
-        "calendar dates you are confident about, plus anything upcoming mentioned in the material)."
+        "calendar dates you are confident about, plus anything upcoming mentioned in the material).",
+        progress,
     )

@@ -1,8 +1,10 @@
 """GuidanceCast trend bot for Telegram."""
 
+import asyncio
 import logging
 import os
-from datetime import time
+import time
+from datetime import time as clock_time
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -24,7 +26,7 @@ TOKEN = os.environ["TELEGRAM_BOT_TOKEN"].strip().strip("\"'")
 PROXY = os.getenv("TELEGRAM_PROXY", "").strip()
 ALLOWED_IDS = {int(x) for x in os.getenv("ALLOWED_USER_IDS", "").replace(" ", "").split(",") if x}
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/London"))
-DAILY_TIME = time.fromisoformat(os.getenv("DAILY_BRIEF_TIME", "08:00")).replace(tzinfo=TIMEZONE)
+DAILY_TIME = clock_time.fromisoformat(os.getenv("DAILY_BRIEF_TIME", "08:00")).replace(tzinfo=TIMEZONE)
 TELEGRAM_LIMIT = 4000
 
 # Only people listed in ALLOWED_USER_IDS can use the bot (each request costs API credits).
@@ -72,18 +74,50 @@ async def send_long(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str)
             await context.bot.send_message(chat_id, chunk, disable_web_page_preview=True)
 
 
-async def run_research(context: ContextTypes.DEFAULT_TYPE, chat_id: int, label: str, coro) -> None:
-    status = await context.bot.send_message(chat_id, f"🔎 Researching {label}... (about a minute)")
-    await context.bot.send_chat_action(chat_id, ChatAction.TYPING)
+RESEARCH_TIMEOUT = 300  # seconds before giving up on a stuck request
+
+
+async def run_research(context: ContextTypes.DEFAULT_TYPE, chat_id: int, label: str, make_coro) -> None:
+    """Run a research task while showing live progress so it's clear the bot isn't frozen."""
+    status = await context.bot.send_message(chat_id, f"🔎 Researching {label}...")
+    stage = "Starting"
+    started = time.monotonic()
+
+    async def progress(text: str) -> None:
+        nonlocal stage
+        stage = text
+
+    async def keep_alive() -> None:
+        last = ""
+        while True:
+            await context.bot.send_chat_action(chat_id, ChatAction.TYPING)
+            elapsed = int(time.monotonic() - started)
+            text = f"🔎 Researching {label}...\n\n{stage}\n⏱ {elapsed}s"
+            if text != last:
+                try:
+                    await status.edit_text(text)
+                except BadRequest:
+                    pass
+                last = text
+            await asyncio.sleep(4)
+
+    ticker = asyncio.create_task(keep_alive())
     try:
-        result = await coro
+        result = await asyncio.wait_for(make_coro(progress), RESEARCH_TIMEOUT)
+    except asyncio.TimeoutError:
+        ticker.cancel()
+        await status.edit_text("⏱ That took too long and was stopped. Please try again.")
+        return
     except research.ResearchError as e:
+        ticker.cancel()
         await status.edit_text(str(e))
         return
     except Exception:
+        ticker.cancel()
         log.exception("Research failed")
         await status.edit_text("⚠️ Something went wrong. Please try again in a few minutes.")
         return
+    ticker.cancel()
 
     await status.delete()
     await send_long(context, chat_id, result)
@@ -98,21 +132,21 @@ async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def trends(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await run_research(context, update.effective_chat.id, "trending topics", research.hot_topics())
+    await run_research(context, update.effective_chat.id, "trending topics", research.hot_topics)
 
 
 async def ideas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     focus = " ".join(context.args).strip() or None
     label = f"episode ideas on “{focus}”" if focus else "episode ideas"
-    await run_research(context, update.effective_chat.id, label, research.podcast_ideas(focus))
+    await run_research(context, update.effective_chat.id, label, lambda p: research.podcast_ideas(focus, p))
 
 
 async def brief(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await run_research(context, update.effective_chat.id, "this week's briefing", research.weekly_brief())
+    await run_research(context, update.effective_chat.id, "this week's briefing", research.weekly_brief)
 
 
 async def daily_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    await run_research(context, context.job.chat_id, "your morning briefing", research.weekly_brief())
+    await run_research(context, context.job.chat_id, "your morning briefing", research.weekly_brief)
 
 
 async def daily_on(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
